@@ -1,0 +1,13 @@
+[package]
+name = "Client_2"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-std = "1.9.0"
+tokio = {version = "1", features = ["full"]}
+serde = {version = "1", features = ["derive"]}
+serde_json = "1"
+rand = "0.8"

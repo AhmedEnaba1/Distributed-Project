@@ -61,7 +61,7 @@
 // use tokio::time::timeout;
 
 // async fn middleware_task(mut middleware_socket: UdpSocket) {
-//     let server_addresses = ["127.0.0.2:21112"/* , "127.0.0.3:21111", "127.0.0.4:21113"*/];
+//     let server_addresses = ["127.0.0.2:8080"/* , "127.0.0.3:21111", "127.0.0.4:21113"*/];
 //     let mut buffer = [0; 1024];
 //     let mut ack_buffer = [0; 1024];
 //     //let middleware_address: SocketAddr = "127.0.0.8:12345".parse().expect("Failed to parse middleware address");
@@ -247,13 +247,13 @@ enum Message {
 }
 
 async fn middleware_task(mut middleware_socket: UdpSocket) {
-    let server_addresses = ["127.0.0.2:21112"];
+    let server_addresses = ["127.0.0.1:8080","127.0.0.2:8080"];
     let mut buffer = [0; 1024];
     let mut ack_buffer = [0; 1024];
 
     loop {
         if let Ok((_bytes_received, client_address)) = middleware_socket.recv_from(&mut buffer).await {
-            let server_socket = UdpSocket::bind("127.0.0.8:4000")
+            let server_socket = UdpSocket::bind("127.0.0.8:8080")
                 .await
                 .expect("Failed to bind server socket");
 
@@ -269,19 +269,9 @@ async fn middleware_task(mut middleware_socket: UdpSocket) {
                     .expect("Failed to send data to server");
             }
 
-            let timeout_duration = Duration::from_secs(1);
+            let timeout_duration = Duration::from_secs(7);
 
-            match timeout(timeout_duration, server_socket.recv_from(&mut ack_buffer)).await {
-                Ok(Ok((_ack_bytes_received, _server_address))) => {
-                    // Handle acknowledgment if needed
-                }
-                Ok(Err(_e)) => {
-                    // Handle acknowledgment error if needed
-                }
-                Err(_) => {
-                    // Handle timeout
-                }
-            }
+            server_socket.recv_from(&mut ack_buffer).await;
 
             middleware_socket
                 .send_to(&ack_buffer, client_address)
@@ -347,7 +337,7 @@ async fn main() {
         println!("Press Enter to send a Request");
         let mut input = String::new();
         std::io::stdin().read_line(&mut input).expect("Failed to read line");
-
+        
         if input.trim() == "" {
             for i in 1..2 {
                 if (i % 90 == 0) {
@@ -361,6 +351,7 @@ async fn main() {
                     .send_to(serialized_request.as_bytes(), middleware_address)
                     .await
                     .expect("Failed to send request to middleware");
+                println! ("Waiting for response.");
 
                 // Receive response from the server (the first one)
                 let mut client_buffer = [0; 1024];
