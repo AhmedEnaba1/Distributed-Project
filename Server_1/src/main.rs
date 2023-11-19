@@ -41,7 +41,7 @@ fn remove_trailing_zeros(data: &mut Vec<u8>) {
 }
 
 async fn server_task(server1_id: usize) {
-    let server_address: SocketAddr = format!("127.0.0.2:8080")
+    let server_address: SocketAddr = format!("10.7.57.6:8080")
         .parse()
         .expect("Failed to parse server address");
 
@@ -94,11 +94,20 @@ async fn server_task(server1_id: usize) {
                                 .await
                                 .expect("Failed to send response to client");
                         } else {
+                            let response_message = Message::Request(format!("Ack from Server 2"));
+                            client_socket
+                                .send_to(
+                                    &serde_json::to_string(&response_message).unwrap().as_bytes(),
+                                    client_address, // Replace with the actual client address
+                                )
+                                .await
+                                .expect("Failed to send response to client");
                             picture_frags
                                 .insert(frag.total_frags_number.try_into().unwrap(), frag.packet);
 
                             let picture_clone: BTreeMap<_, _> =
                                 picture_frags.clone().into_iter().collect();
+                            
 
                             for (_key, value) in picture_clone {
                                 picture.extend_from_slice(&value);
@@ -119,46 +128,20 @@ async fn server_task(server1_id: usize) {
                                     let enc = Encoder::new(payload, destination_image);
                                     let result = enc.encode_alpha();
                                     save_image_buffer(result, "encrypted.png".to_string());
+                                    println!("Finished Saving!");
 
-                                    println!("Sending encrypted image");
                                     picture.clear();
-                                    picture = fs::read("encrypted.png")
-                                        .expect("Failed to read the image file");
 
-                                    let packet_number = (picture.len() / 16384) + 1;
-                                    println!("{}", packet_number);
-
-                                    for (index, piece) in picture.chunks(16384).enumerate() {
-                                        let is_last_piece = index == packet_number - 1;
-                                        let Frag = frag {
-                                            total_frags_number: packet_number,
-                                            position: if is_last_piece {
-                                                -1
-                                            } else {
-                                                index.try_into().unwrap()
-                                            },
-                                            packet: piece.to_vec(),
-                                        };
-
-                                        let serialized = serde_json::to_string(&Frag).unwrap();
-
-                                        client_socket
-                                            .send_to(&serialized.as_bytes(), client_address)
-                                            .await
-                                            .expect("Failed to send piece to middleware");
-                                        println!("Server sent packet {}", index);
-
-                                        client_socket.recv_from(&mut ack_buffer).await.expect(
-                                            "Failed to receive acknowledgement from server",
-                                        );
-                                        println!("Server received ack packet {}", index);
-                                    }
-                                    picture.clear();
-                                    ack_buffer = [0; 1024]
+                                    ack_buffer = [0; 1024];
                                 }
+                                picture.clear();
+
                             } else {
                                 println!("Failed to create image!");
                             }
+                            picture_frags.clear();
+                            serviced_client = 0;
+                            current_client = "0.0.0.0:0".parse().expect("Failed to parse");
                         }
                         leader = false;
                     }
@@ -175,14 +158,14 @@ async fn server_task(server1_id: usize) {
 async fn start_election(server1_id: usize) -> bool {
     // Wrap the UdpSocket in Arc
     let socket2 = Arc::new(
-        UdpSocket::bind("127.0.0.1:2112")
+        UdpSocket::bind("10.7.57.6:2112")
             .await
             .expect("Failed to bind server socket"),
     );
 
     // Wrap the UdpSocket in Arc
     let socket3 = Arc::new(
-        UdpSocket::bind("127.0.0.1:2113")
+        UdpSocket::bind("10.7.57.6:2113")
             .await
             .expect("Failed to bind server socket"),
     );
@@ -194,7 +177,7 @@ async fn start_election(server1_id: usize) -> bool {
     socket2
         .send_to(
             &serde_json::to_string(&election_message).unwrap().as_bytes(),
-            "127.0.0.2:2112", // Replace with actual addresses of other servers
+            "10.7.57.249:2112", // Replace with actual addresses of other servers
         )
         .await
         .expect("Failed to send Election message");
@@ -202,7 +185,7 @@ async fn start_election(server1_id: usize) -> bool {
     socket3
         .send_to(
             &serde_json::to_string(&election_message).unwrap().as_bytes(),
-            "127.0.0.3:2113", // Replace with actual addresses of other servers
+            "10.7.57.232:2113", // Replace with actual addresses of other servers
         )
         .await
         .expect("Failed to send Election message");
@@ -252,10 +235,9 @@ async fn receive_election_message(socket: Arc<UdpSocket>, timeout: Duration) -> 
         .map_err(|_| serde_json::Error::custom("Timeout occurred"))
 }
 
-
 #[tokio::main]
 async fn main() {
-    let server1_id = 2; // Replace with the actual ID of the server
+    let server1_id = 1; // Replace with the actual ID of the server
 
     let task = server_task(server1_id);
     let _ = tokio::join!(task);
