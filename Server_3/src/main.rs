@@ -194,10 +194,10 @@ async fn start_election(server1_id: usize) -> bool {
     let timeout = Duration::from_millis(200);
 
     // Update the server IDs
-    let server2_id = receive_election_message(Arc::clone(&socket2), timeout)
+    let server2_id = receive_election_message(Arc::clone(&socket1), timeout)
         .await
         .unwrap_or(0);
-    let server3_id = receive_election_message(Arc::clone(&socket3), timeout)
+    let server3_id = receive_election_message(Arc::clone(&socket2), timeout)
         .await
         .unwrap_or(0);
 

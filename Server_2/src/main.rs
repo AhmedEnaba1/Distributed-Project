@@ -41,7 +41,7 @@ fn remove_trailing_zeros(data: &mut Vec<u8>) {
 }
 
 async fn server_task(server1_id: usize) {
-    let server_address: SocketAddr = format!("10.7.57.249:8080")
+    let server_address: SocketAddr = format!("127.0.0.2:8080")
         .parse()
         .expect("Failed to parse server address");
 
@@ -158,14 +158,14 @@ async fn server_task(server1_id: usize) {
 async fn start_election(server1_id: usize) -> bool {
     // Wrap the UdpSocket in Arc
     let socket1 = Arc::new(
-        UdpSocket::bind("10.7.57.249:2112")
+        UdpSocket::bind("127.0.0.2:2112")
             .await
             .expect("Failed to bind server socket"),
     );
 
     // Wrap the UdpSocket in Arc
     let socket3 = Arc::new(
-        UdpSocket::bind("10.7.57.249:2114")
+        UdpSocket::bind("127.0.0.2:2114")
             .await
             .expect("Failed to bind server socket"),
     );
@@ -177,7 +177,7 @@ async fn start_election(server1_id: usize) -> bool {
     socket1
         .send_to(
             &serde_json::to_string(&election_message).unwrap().as_bytes(),
-            "10.7.57.6:2112", // Replace with actual addresses of other servers
+            "127.0.0.1:2112", // Replace with actual addresses of other servers
         )
         .await
         .expect("Failed to send Election message");
@@ -185,7 +185,7 @@ async fn start_election(server1_id: usize) -> bool {
     socket3
         .send_to(
             &serde_json::to_string(&election_message).unwrap().as_bytes(),
-            "10.7.57.232:2114", // Replace with actual addresses of other servers
+            "127.0.0.3:2114", // Replace with actual addresses of other servers
         )
         .await
         .expect("Failed to send Election message");
