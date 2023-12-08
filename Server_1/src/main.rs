@@ -19,6 +19,13 @@ struct frag {
     packet: Vec<u8>,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct User {
+    address: String,
+    name: String,
+    user_type: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 enum Message {
     Election(f32),
@@ -79,9 +86,12 @@ async fn server_task(sys: &mut System) {
 
                     // Start a new election
                     if (serviced_client == 0) {
-                        println!("Server 2 is starting an election.");
+                        println!("Server 1 is starting an election.");
                         leader = start_election(cpu_usage).await;
-                        current_client = client_address;
+                        if leader {
+                            current_client = client_address;
+                            println!("Servcing: {}", current_client);
+                        }
                     }
                     if leader || (current_client == client_address) {
                         let frag: frag = serde_json::from_str(&request).unwrap();
@@ -136,43 +146,51 @@ async fn server_task(sys: &mut System) {
                                     picture.clear();
 
                                     ack_buffer = [0; 1024];
+
+                                    let picture_data =
+                                        fs::read("encrypted.png").expect("Failed to read image!");
+                                    let frags = (picture_data.len() / 16384) + 1;
+
+                                    println!("Sending Picture to client...");
+
+                                    for (index, piece) in picture_data.chunks(16384).enumerate() {
+                                        let end = index == frags - 1;
+                                        let frag = frag {
+                                            packet: piece.to_vec(),
+                                            position: if end {
+                                                -1
+                                            } else {
+                                                index.try_into().unwrap()
+                                            },
+                                            total_frags_number: frags,
+                                        };
+
+                                        let se = serde_json::to_string(&frag).unwrap();
+                                        let request_message = Message::Request(se);
+                                        let serialized_request =
+                                            serde_json::to_string(&request_message)
+                                                .expect("Failed to serialize request");
+
+                                        client_socket
+                                            .send_to(serialized_request.as_bytes(), client_address)
+                                            .await
+                                            .expect("Failed to send request to client");
+
+                                        // Receive response from the server (the first one)
+                                        let mut message_buffer = [0; 65536];
+                                        client_socket
+                                            .recv_from(&mut message_buffer)
+                                            .await
+                                            .expect("Failed to receive response from client");
+
+                                        let response = String::from_utf8_lossy(&message_buffer);
+                                        //println!("Server received response from client: {}", response);
+                                    }
+                                    println!("Sent Encrypted Image!");
                                 }
                                 picture.clear();
                             } else {
                                 println!("Failed to create image!");
-                            }
-                            let picture_data = fs::read("encrypted.png").expect("Failed to read image!");
-                            let frags = (picture_data.len() / 16384) + 1;
-                            
-                            println!("Sending Picture to client!");
-
-                            for (index, piece) in picture_data.chunks(16384).enumerate() {
-                                let end = index == frags - 1;
-                                let frag = frag {
-                                    packet: piece.to_vec(),
-                                    position: if end { -1 } else { index.try_into().unwrap() },
-                                    total_frags_number: frags,
-                                };
-            
-                                let se = serde_json::to_string(&frag).unwrap();
-                                let request_message = Message::Request(se);
-                                let serialized_request = serde_json::to_string(&request_message)
-                                    .expect("Failed to serialize request");
-            
-                                client_socket
-                                    .send_to(serialized_request.as_bytes(), client_address)
-                                    .await
-                                    .expect("Failed to send request to client");
-            
-                                // Receive response from the server (the first one)
-                                let mut message_buffer = [0; 65536];
-                                client_socket
-                                    .recv_from(&mut message_buffer)
-                                    .await
-                                    .expect("Failed to receive response from client");
-            
-                                let response = String::from_utf8_lossy(&message_buffer);
-                                //println!("Server received response from client: {}", response);
                             }
                             picture_frags.clear();
                             serviced_client = 0;
@@ -200,7 +218,7 @@ async fn start_election(cpu_usage: f32) -> bool {
 
     // Wrap the UdpSocket in Arc
     let socket3 = Arc::new(
-        UdpSocket::bind("127.0.0.1:2113")
+        UdpSocket::bind("127.0.0.1:2111")
             .await
             .expect("Failed to bind server socket"),
     );
@@ -220,13 +238,13 @@ async fn start_election(cpu_usage: f32) -> bool {
     socket3
         .send_to(
             &serde_json::to_string(&election_message).unwrap().as_bytes(),
-            "127.0.0.3:2113", // Replace with actual addresses of other servers
+            "127.0.0.3:2111", // Replace with actual addresses of other servers
         )
         .await
         .expect("Failed to send Election message");
 
     // Set a timeout for receiving messages
-    let timeout = Duration::from_millis(200);
+    let timeout = Duration::from_millis(500);
 
     // Update the server IDs
     let cpu_usage2 = receive_election_message(Arc::clone(&socket2), timeout)
@@ -238,12 +256,12 @@ async fn start_election(cpu_usage: f32) -> bool {
 
     println!("IDs: {},{},{}", cpu_usage, cpu_usage2, cpu_usage3);
 
-    let leader = false;
+    let mut leader = false;
 
     // Check if the current server is the Leader or not
     if (cpu_usage < cpu_usage2 && cpu_usage < cpu_usage3) {
 
-        let leader = true;
+        leader = true;
         println!("This Server is the Coordinator!");
 
     }

@@ -8,6 +8,7 @@ use std::time::Duration;
 use std::{collections::BTreeMap, net::SocketAddr, sync::Arc};
 use steganography::encoder::Encoder;
 use steganography::util::{file_as_dynamic_image, save_image_buffer, str_to_bytes};
+use sysinfo::{CpuExt, System, SystemExt};
 use tokio::sync::Mutex as TokioMutex;
 use tokio::time::sleep;
 
@@ -18,9 +19,16 @@ struct frag {
     packet: Vec<u8>,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct User {
+    address: String,
+    name: String,
+    user_type: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 enum Message {
-    Election(usize),
+    Election(f32),
     Request(String),
 }
 
@@ -40,7 +48,7 @@ fn remove_trailing_zeros(data: &mut Vec<u8>) {
     }
 }
 
-async fn server_task(server1_id: usize) {
+async fn server_task(sys: &mut System) {
     let server_address: SocketAddr = format!("127.0.0.2:8080")
         .parse()
         .expect("Failed to parse server address");
@@ -60,24 +68,27 @@ async fn server_task(server1_id: usize) {
     let mut leader = false;
 
     loop {
+        sys.refresh_all();
+
+        // Access CPU information
+        let cpu = sys.global_cpu_info();
+        let cpu_usage = cpu.cpu_usage();
+
         if let Ok((bytes_received, client_address)) = client_socket.recv_from(&mut buffer).await {
-            println!("Source: {}", client_address);
             let received_message: Message = serde_json::from_slice(&buffer[..bytes_received])
                 .expect("Failed to deserialize message");
 
             match received_message {
                 Message::Request(request) => {
-                    // Handle the actual request from the middleware
-                    println!(
-                        "Server {} received request!, from {}",
-                        server1_id, client_address
-                    );
-
                     // Start a new election
                     if (serviced_client == 0) {
+                        println!("Server 2 received request!, from {}", client_address);
                         println!("Server 2 is starting an election.");
-                        leader = start_election(server1_id).await;
-                        current_client = client_address;
+                        leader = start_election(cpu_usage).await;
+                        if leader {
+                            current_client = client_address;
+                            println!("Servcing: {}", current_client);
+                        }
                     }
                     if leader || (current_client == client_address) {
                         let frag: frag = serde_json::from_str(&request).unwrap();
@@ -107,7 +118,6 @@ async fn server_task(server1_id: usize) {
 
                             let picture_clone: BTreeMap<_, _> =
                                 picture_frags.clone().into_iter().collect();
-                            
 
                             for (_key, value) in picture_clone {
                                 picture.extend_from_slice(&value);
@@ -133,9 +143,49 @@ async fn server_task(server1_id: usize) {
                                     picture.clear();
 
                                     ack_buffer = [0; 1024];
+
+                                    let picture_data =
+                                        fs::read("encrypted.png").expect("Failed to read image!");
+                                    let frags = (picture_data.len() / 16384) + 1;
+
+                                    println!("Sending Picture to client...");
+
+                                    for (index, piece) in picture_data.chunks(16384).enumerate() {
+                                        let end = index == frags - 1;
+                                        let frag = frag {
+                                            packet: piece.to_vec(),
+                                            position: if end {
+                                                -1
+                                            } else {
+                                                index.try_into().unwrap()
+                                            },
+                                            total_frags_number: frags,
+                                        };
+
+                                        let se = serde_json::to_string(&frag).unwrap();
+                                        let request_message = Message::Request(se);
+                                        let serialized_request =
+                                            serde_json::to_string(&request_message)
+                                                .expect("Failed to serialize request");
+
+                                        client_socket
+                                            .send_to(serialized_request.as_bytes(), client_address)
+                                            .await
+                                            .expect("Failed to send request to client");
+
+                                        // Receive response from the server (the first one)
+                                        let mut message_buffer = [0; 65536];
+                                        client_socket
+                                            .recv_from(&mut message_buffer)
+                                            .await
+                                            .expect("Failed to receive response from client");
+
+                                        let response = String::from_utf8_lossy(&message_buffer);
+                                        //println!("Server received response from client: {}", response);
+                                    }
+                                    println!("Sent Encrypted Image!");
                                 }
                                 picture.clear();
-
                             } else {
                                 println!("Failed to create image!");
                             }
@@ -155,9 +205,9 @@ async fn server_task(server1_id: usize) {
     }
 }
 
-async fn start_election(server1_id: usize) -> bool {
+async fn start_election(cpu_usage: f32) -> bool {
     // Wrap the UdpSocket in Arc
-    let socket1 = Arc::new(
+    let socket2 = Arc::new(
         UdpSocket::bind("127.0.0.2:2112")
             .await
             .expect("Failed to bind server socket"),
@@ -165,16 +215,16 @@ async fn start_election(server1_id: usize) -> bool {
 
     // Wrap the UdpSocket in Arc
     let socket3 = Arc::new(
-        UdpSocket::bind("127.0.0.2:2114")
+        UdpSocket::bind("127.0.0.2:2113")
             .await
             .expect("Failed to bind server socket"),
     );
 
     // Broadcast Election messages to servers with higher IDs
-    let election_message = Message::Election(server1_id);
+    let election_message = Message::Election(cpu_usage);
 
     // Use Arc to share ownership without requiring Clone
-    socket1
+    socket2
         .send_to(
             &serde_json::to_string(&election_message).unwrap().as_bytes(),
             "127.0.0.1:2112", // Replace with actual addresses of other servers
@@ -185,37 +235,40 @@ async fn start_election(server1_id: usize) -> bool {
     socket3
         .send_to(
             &serde_json::to_string(&election_message).unwrap().as_bytes(),
-            "127.0.0.3:2114", // Replace with actual addresses of other servers
+            "127.0.0.3:2113", // Replace with actual addresses of other servers
         )
         .await
         .expect("Failed to send Election message");
 
     // Set a timeout for receiving messages
-    let timeout = Duration::from_millis(200);
+    let timeout = Duration::from_millis(500);
 
     // Update the server IDs
-    let server2_id = receive_election_message(Arc::clone(&socket1), timeout)
+    let cpu_usage2 = receive_election_message(Arc::clone(&socket2), timeout)
         .await
-        .unwrap_or(0);
-    let server3_id = receive_election_message(Arc::clone(&socket3), timeout)
+        .unwrap_or(100.0);
+    let cpu_usage3 = receive_election_message(Arc::clone(&socket3), timeout)
         .await
-        .unwrap_or(0);
+        .unwrap_or(100.0);
 
-    println!("IDs: {},{}", server2_id, server3_id);
+    println!("IDs: {},{},{}", cpu_usage, cpu_usage2, cpu_usage3);
+
+    let mut leader = false;
 
     // Check if the current server is the Leader or not
-    let leader = server1_id > server2_id && server1_id > server3_id;
-    if leader {
-        // Call a function to process the request (e.g., become the coordinator)
+    if (cpu_usage < cpu_usage2 && cpu_usage < cpu_usage3) {
+
+        leader = true;
         println!("This Server is the Coordinator!");
+
     }
 
     leader
 }
 
-async fn receive_election_message(socket: Arc<UdpSocket>, timeout: Duration) -> Result<usize> {
+async fn receive_election_message(socket: Arc<UdpSocket>, timeout: Duration) -> Result<f32> {
     let mut buffer = [0; 1024];
-    let mut server_id: usize = 0;
+    let mut server_id: f32 = 100.0;
 
     // Use Arc to share ownership without requiring Clone
     let result = tokio::time::timeout(timeout, async {
@@ -237,8 +290,8 @@ async fn receive_election_message(socket: Arc<UdpSocket>, timeout: Duration) -> 
 
 #[tokio::main]
 async fn main() {
-    let server1_id = 2; // Replace with the actual ID of the server
+    let mut sys = System::new();
 
-    let task = server_task(server1_id);
+    let task = server_task(&mut sys);
     let _ = tokio::join!(task);
 }

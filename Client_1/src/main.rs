@@ -21,6 +21,13 @@ struct frag {
     packet: Vec<u8>,
 }
 
+#[derive(Debug, Deserialize)]
+struct User {
+    address: String,
+    name: String,
+    user_type: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 enum Message {
     Request(String),
@@ -28,7 +35,7 @@ enum Message {
 
 async fn middleware_task(mut middleware_socket: UdpSocket) {
     let server_addresses = [
-        "127.0.0.1:8080", /*, "127.0.0.2:8080","10.7.57.232:8080"*/
+        "127.0.0.1:8080",  "127.0.0.2:8080","127.0.0.3:8081"
     ];
     let mut buffer = [0; 65536];
     let mut ack_buffer = [0; 1024];
@@ -113,86 +120,6 @@ async fn middleware_task(mut middleware_socket: UdpSocket) {
         }
     }
 }
-
-// async fn middleware_task(middleware_socket: UdpSocket) {
-//     let server_addresses = ["127.0.0.2:21112", "127.0.0.3:21111", "127.0.0.4:21113"];
-//     let mut buffer = [0; BUFFER_SIZE];
-//     let mut ack_buffer = [0; BUFFER_SIZE];
-
-//     let _server_socket = UdpSocket::bind("127.0.0.8:0")
-//         .await
-//         .expect("Failed to bind server socket");
-//     let mut current_server = "".to_string();
-
-//     while let Ok((_bytes_received, client_address)) = middleware_socket.recv_from(&mut buffer).await
-//     {
-//         if client_address.ip().to_string() == "127.0.0.8" {
-//             let packet_string = String::from_utf8_lossy(&buffer[0.._bytes_received]);
-//             let deserialized: Chunk = serde_json::from_str(&packet_string).unwrap();
-//             if deserialized.position == 0 {
-//                 for server_address in &server_addresses {
-//                     let server_address: SocketAddr = server_address
-//                         .parse()
-//                         .expect("Failed to parse server address");
-//                     middleware_socket
-//                         .send_to(&buffer[0.._bytes_received], &server_address)
-//                         .await
-//                         .expect("Failed to send data to server");
-//                 }
-//             } else {
-//                 let server_address: SocketAddr = current_server
-//                     .parse()
-//                     .expect("Failed to parse server address");
-//                 middleware_socket
-//                     .send_to(&buffer[0.._bytes_received], server_address)
-//                     .await
-//                     .expect("Failed to send data to server");
-//             }
-//             shift_left(&mut buffer, _bytes_received);
-//             let timeout_duration = Duration::from_secs(120);
-//             match timeout(
-//                 timeout_duration,
-//                 middleware_socket.recv_from(&mut ack_buffer),
-//             )
-//             .await
-//             {
-//                 Ok(Ok((ack_bytes_received, _server_address))) => {
-//                     let ack_string = format!("Ack {} sent to client", var);
-//                     middleware_socket
-//                         .send_to(ack_string.as_bytes(), client_address)
-//                         .await
-//                         .expect("Failed to send acknowledgment to client");
-//                     shift_left(&mut ack_buffer, ack_bytes_received);
-//                     current_server = _server_address.to_string();
-//                 }
-//                 Err(_) => {}
-//                 Ok(Err(_e)) => {}
-//             }
-//         } else {
-//             let my_client_address = "127.0.0.8:8085";
-//             middleware_socket
-//                 .send_to(&buffer[0.._bytes_received], my_client_address)
-//                 .await
-//                 .expect("Failed to send acknowledgment to client");
-//             middleware_socket
-//                 .recv_from(&mut ack_buffer)
-//                 .await
-//                 .expect("Failed");
-//             middleware_socket
-//                 .send_to(&buffer[0.._bytes_received], client_address)
-//                 .await
-//                 .expect("Failed to send acknowledgment to client");
-//             shift_left(&mut ack_buffer, _bytes_received);
-//         }
-
-//         // Sleep to give time for the server to send the acknowledgment
-//         sleep(Duration::from_millis(10)).await;
-
-//         // Clear the buffer for the next request
-//         buffer = [0; BUFFER_SIZE];
-//         ack_buffer = [0; BUFFER_SIZE];
-//     }
-// }
 
 fn remove_trailing_zeros(data: &mut Vec<u8>) {
     // Find the index of the last element that is not zero
