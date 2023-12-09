@@ -4,6 +4,7 @@ use serde_json::value::Index;
 use serde_json::Result;
 use std::collections::HashMap;
 use std::fs;
+use std::io::{self, Write};
 use std::time::Duration;
 use std::{collections::BTreeMap, net::SocketAddr, sync::Arc};
 use steganography::encoder::Encoder;
@@ -23,13 +24,20 @@ struct frag {
 struct User {
     address: String,
     name: String,
-    user_type: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 enum Message {
     Election(f32),
     Request(String),
+    DOs(String),
+}
+
+fn getIP(socket_addr: SocketAddr) -> String {
+    if let Some(ip) = socket_addr.ip().to_string().split(':').next() {
+        return ip.to_string();
+    }
+    String::new()
 }
 
 fn remove_trailing_zeros(data: &mut Vec<u8>) {
@@ -66,6 +74,9 @@ async fn server_task(sys: &mut System) {
     let mut serviced_client = 0;
     let mut current_client: SocketAddr = "0.0.0.0:0".parse().expect("Failed to parse");
     let mut leader = false;
+    let mut registered_users: Vec<User> = Vec::new();
+
+    println!("Server 2 is UP!");
 
     loop {
         sys.refresh_all();
@@ -79,9 +90,58 @@ async fn server_task(sys: &mut System) {
                 .expect("Failed to deserialize message");
 
             match received_message {
+                Message::DOs(query) => {
+                    let mes: String = query;
+                    if mes.starts_with("Register:") {
+                        let parts: Vec<&str> = mes.trim().split(':').collect();
+                        let username = parts[1].trim();
+                        let user_address = client_address.ip().to_string();
+                        let new_user = User {
+                            address: user_address,
+                            name: username.to_string(),
+                        };
+                        registered_users.push(new_user);
+                        println!("User ({}) registered", username);
+                        let response = "User registered";
+                        client_socket
+                            .send_to(response.as_bytes(), client_address)
+                            .await
+                            .expect("Failed to send response");
+                        continue;
+                    } else if mes.starts_with("Remove") {
+                        let user_address = client_address.ip().to_string();
+                        if let Some(index) = registered_users
+                            .iter()
+                            .position(|user| user.address == user_address)
+                        {
+                            println!("User ({}) went offline.", registered_users[index].name);
+                            registered_users.remove(index);
+                        }
+                        let response = "User";
+                        client_socket
+                            .send_to(response.as_bytes(), client_address)
+                            .await
+                            .expect("Failed to send response");
+                        continue;
+                    } else {
+                        println!("Server 2 received request!, from {}", client_address);
+                        println!("Server 2 is starting an election.");
+                        leader = start_election(cpu_usage).await;
+
+                        if leader{
+                            let reg_users = serde_json::to_string(&registered_users)
+                                .expect("Failed to serialize active users to JSON");
+                            client_socket
+                                .send_to(reg_users.as_bytes(), client_address)
+                                .await
+                                .expect("Failed to send active users list");
+                        }
+                        continue;
+                    }
+                }
                 Message::Request(request) => {
                     // Start a new election
-                    if (serviced_client == 0) {
+                    if serviced_client == 0 {
                         println!("Server 2 received request!, from {}", client_address);
                         println!("Server 2 is starting an election.");
                         leader = start_election(cpu_usage).await;
@@ -125,11 +185,10 @@ async fn server_task(sys: &mut System) {
                             remove_trailing_zeros(&mut picture);
 
                             if let Ok(picture_recv) = image::load_from_memory(&picture) {
-                                if let Err(err) = picture_recv.save("j_out.png") {
+                                if let Err(_err) = picture_recv.save("j_out.png") {
                                     eprintln!("Failed to save image");
                                 } else {
-                                    println!("Saved successfully!");
-                                    let mut ack_buffer = [0; 1024];
+                                    let mut _ack_buffer = [0; 1024];
 
                                     let image_string = base64::encode(picture.clone());
                                     let payload = str_to_bytes(&image_string);
@@ -138,11 +197,11 @@ async fn server_task(sys: &mut System) {
                                     let enc = Encoder::new(payload, destination_image);
                                     let result = enc.encode_alpha();
                                     save_image_buffer(result, "encrypted.png".to_string());
-                                    println!("Finished Saving!");
+                                    println!("Recieved Image successfully!");
 
                                     picture.clear();
 
-                                    ack_buffer = [0; 1024];
+                                    _ack_buffer = [0; 1024];
 
                                     let picture_data =
                                         fs::read("encrypted.png").expect("Failed to read image!");
@@ -180,7 +239,7 @@ async fn server_task(sys: &mut System) {
                                             .await
                                             .expect("Failed to receive response from client");
 
-                                        let response = String::from_utf8_lossy(&message_buffer);
+                                        let _response = String::from_utf8_lossy(&message_buffer);
                                         //println!("Server received response from client: {}", response);
                                     }
                                     println!("Sent Encrypted Image!");
@@ -256,11 +315,9 @@ async fn start_election(cpu_usage: f32) -> bool {
     let mut leader = false;
 
     // Check if the current server is the Leader or not
-    if (cpu_usage < cpu_usage2 && cpu_usage < cpu_usage3) {
-
+    if cpu_usage < cpu_usage2 && cpu_usage < cpu_usage3 {
         leader = true;
         println!("This Server is the Coordinator!");
-
     }
 
     leader
