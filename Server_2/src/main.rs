@@ -128,7 +128,7 @@ async fn server_task(sys: &mut System) {
                         println!("Server 2 is starting an election.");
                         leader = start_election(cpu_usage).await;
 
-                        if leader{
+                        if leader {
                             let reg_users = serde_json::to_string(&registered_users)
                                 .expect("Failed to serialize active users to JSON");
                             client_socket
@@ -184,70 +184,64 @@ async fn server_task(sys: &mut System) {
                             }
                             remove_trailing_zeros(&mut picture);
 
-                            if let Ok(picture_recv) = image::load_from_memory(&picture) {
-                                if let Err(_err) = picture_recv.save("j_out.png") {
-                                    eprintln!("Failed to save image");
-                                } else {
-                                    let mut _ack_buffer = [0; 1024];
+                            // if let Ok(picture_recv) = image::load_from_memory(&picture) {
+                            //     if let Err(_err) = picture_recv.save("j_out.png") {
+                            //         eprintln!("Failed to save image");
+                            //     } else {
+                            let mut _ack_buffer = [0; 1024];
 
-                                    let image_string = base64::encode(picture.clone());
-                                    let payload = str_to_bytes(&image_string);
-                                    let destination_image =
-                                        file_as_dynamic_image("Mask.png".to_string());
-                                    let enc = Encoder::new(payload, destination_image);
-                                    let result = enc.encode_alpha();
-                                    save_image_buffer(result, "encrypted.png".to_string());
-                                    println!("Recieved Image successfully!");
+                            let image_string = base64::encode(picture.clone());
+                            let payload = str_to_bytes(&image_string);
+                            let destination_image = file_as_dynamic_image("Mask.png".to_string());
+                            let enc = Encoder::new(payload, destination_image);
+                            let result = enc.encode_alpha();
+                            save_image_buffer(result, "encrypted.png".to_string());
+                            println!("Recieved Image successfully!");
 
-                                    picture.clear();
+                            picture.clear();
 
-                                    _ack_buffer = [0; 1024];
+                            _ack_buffer = [0; 1024];
 
-                                    let picture_data =
-                                        fs::read("encrypted.png").expect("Failed to read image!");
-                                    let frags = (picture_data.len() / 16384) + 1;
+                            let picture_data =
+                                fs::read("encrypted.png").expect("Failed to read image!");
+                            let frags = (picture_data.len() / 16384) + 1;
 
-                                    println!("Sending Picture to client...");
+                            println!("Sending Picture to client...");
 
-                                    for (index, piece) in picture_data.chunks(16384).enumerate() {
-                                        let end = index == frags - 1;
-                                        let frag = frag {
-                                            packet: piece.to_vec(),
-                                            position: if end {
-                                                -1
-                                            } else {
-                                                index.try_into().unwrap()
-                                            },
-                                            total_frags_number: frags,
-                                        };
+                            for (index, piece) in picture_data.chunks(16384).enumerate() {
+                                let end = index == frags - 1;
+                                let frag = frag {
+                                    packet: piece.to_vec(),
+                                    position: if end { -1 } else { index.try_into().unwrap() },
+                                    total_frags_number: frags,
+                                };
 
-                                        let se = serde_json::to_string(&frag).unwrap();
-                                        let request_message = Message::Request(se);
-                                        let serialized_request =
-                                            serde_json::to_string(&request_message)
-                                                .expect("Failed to serialize request");
+                                let se = serde_json::to_string(&frag).unwrap();
+                                let request_message = Message::Request(se);
+                                let serialized_request = serde_json::to_string(&request_message)
+                                    .expect("Failed to serialize request");
 
-                                        client_socket
-                                            .send_to(serialized_request.as_bytes(), client_address)
-                                            .await
-                                            .expect("Failed to send request to client");
+                                client_socket
+                                    .send_to(serialized_request.as_bytes(), client_address)
+                                    .await
+                                    .expect("Failed to send request to client");
 
-                                        // Receive response from the server (the first one)
-                                        let mut message_buffer = [0; 65536];
-                                        client_socket
-                                            .recv_from(&mut message_buffer)
-                                            .await
-                                            .expect("Failed to receive response from client");
+                                // Receive response from the server (the first one)
+                                let mut message_buffer = [0; 65536];
+                                client_socket
+                                    .recv_from(&mut message_buffer)
+                                    .await
+                                    .expect("Failed to receive response from client");
 
-                                        let _response = String::from_utf8_lossy(&message_buffer);
-                                        //println!("Server received response from client: {}", response);
-                                    }
-                                    println!("Sent Encrypted Image!");
-                                }
-                                picture.clear();
-                            } else {
-                                println!("Failed to create image!");
+                                let _response = String::from_utf8_lossy(&message_buffer);
+                                //println!("Server received response from client: {}", response);
                             }
+                            println!("Sent Encrypted Image!");
+                            //}
+                            picture.clear();
+                            // } else {
+                            //     println!("Failed to create image!");
+                            // }
                             picture_frags.clear();
                             serviced_client = 0;
                             current_client = "0.0.0.0:0".parse().expect("Failed to parse");
